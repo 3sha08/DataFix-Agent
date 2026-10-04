@@ -1,0 +1,21 @@
+# Virtual environment
+.venv/
+venv/
+
+# Environment variables / secrets
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# IDE / OS
+.vscode/
+.DS_Store
+Thumbs.db
+
+# DataFix generated outputs
+outputs/
+*.log
