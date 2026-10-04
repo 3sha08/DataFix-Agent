@@ -76,3 +76,24 @@ def validate_state(state: DataFixAgentState) -> DataFixAgentState:
     )
 
     return state
+
+from datafix.agents.reasoner import generate_reasoning
+
+
+def reason_state(state: DataFixAgentState) -> DataFixAgentState:
+    """Use the LLM to reason over deterministic DataFix findings."""
+
+    if not state.issues:
+        state.reasoning_summary = (
+            "No data-quality issues were detected. "
+            "No remediation reasoning is required."
+        )
+        return state
+
+    state.reasoning_summary = generate_reasoning(
+        state.profile,
+        state.issues,
+        state.remediation_plan,
+    )
+
+    return state
