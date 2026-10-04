@@ -78,10 +78,11 @@ def validate_state(state: DataFixAgentState) -> DataFixAgentState:
     return state
 
 from datafix.agents.reasoner import generate_reasoning
+from datafix.agents.fallback_reasoner import generate_fallback_reasoning
 
 
 def reason_state(state: DataFixAgentState) -> DataFixAgentState:
-    """Use the LLM to reason over deterministic DataFix findings."""
+    """Reason over findings with the LLM, falling back safely if unavailable."""
 
     if not state.issues:
         state.reasoning_summary = (
@@ -90,10 +91,16 @@ def reason_state(state: DataFixAgentState) -> DataFixAgentState:
         )
         return state
 
-    state.reasoning_summary = generate_reasoning(
-        state.profile,
-        state.issues,
-        state.remediation_plan,
-    )
+    try:
+        state.reasoning_summary = generate_reasoning(
+            state.profile,
+            state.issues,
+            state.remediation_plan,
+        )
+    except Exception:
+        state.reasoning_summary = generate_fallback_reasoning(
+            state.issues,
+            state.remediation_plan,
+        )
 
     return state
