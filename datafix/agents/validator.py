@@ -61,7 +61,17 @@ def validate_remediation(
         existed_before = issue_key in before_keys
         exists_after = issue_key in after_keys
 
-        if existed_before and not exists_after:
+        if action["action"] == "flag_outliers":
+            flag_column = f"{action.get('column')}_outlier_flag"
+
+            if existed_before and flag_column in after_df.columns:
+                verification_status = "resolved"
+            elif existed_before:
+                verification_status = "remaining"
+            else:
+                verification_status = "not_detected_before"
+
+        elif existed_before and not exists_after:
             verification_status = "resolved"
 
         elif existed_before and exists_after:
