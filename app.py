@@ -3,6 +3,7 @@ import pandas as pd
 from datafix.models.agent_state import create_initial_state
 from datafix.agents.workflow import (
     analyze_state,
+    reason_state,
     apply_approval_state,
     execute_state,
     validate_state,
@@ -59,6 +60,7 @@ if uploaded_file is not None:
 
     state = create_initial_state(df)
     state = analyze_state(state)
+    state = reason_state(state)
     st.subheader("Data Quality Analysis")
     st.write(
     f"DataFix detected {len(state.issues)} quality issue groups.")
@@ -79,8 +81,11 @@ if uploaded_file is not None:
                 f"Severity: **{severity}** | "
                 f"Affected: **{count}**"
             )
-
+                
+        st.subheader("Agent Reasoning")
+        st.info(state.reasoning_summary)
         st.subheader("Proposed Remediation Plan")
+
 
         for action in state.remediation_plan:
             st.write(
