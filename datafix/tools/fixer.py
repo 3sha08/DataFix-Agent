@@ -114,10 +114,16 @@ def _standardize_categories(
     column: str,
 ) -> tuple[pd.DataFrame, str]:
     """
-    Standardize equivalent text categories.
+    Standardize equivalent text categories deterministically.
 
-    Values are trimmed and grouped case-insensitively.
-    The most frequent cleaned representation becomes canonical.
+    Handles:
+    - leading/trailing whitespace
+    - case differences
+    - punctuation/separator differences
+    - common semantic aliases
+
+    The most frequent cleaned representation becomes canonical when
+    no explicit semantic alias is defined.
     """
 
     if column not in df.columns:
@@ -130,28 +136,76 @@ def _standardize_categories(
     if non_null.empty:
         return result, f"No categories found in '{column}'."
 
+    # Explicit conservative aliases for common equivalent categories.
+    semantic_aliases = {
+        "master": "Masters",
+        "masters": "Masters",
+        "master degree": "Masters",
+        "masters degree": "Masters",
+        "phd": "PhD",
+        "ph d": "PhD",
+        "doctorate": "PhD",
+        "bachelor": "Bachelors",
+        "bachelors": "Bachelors",
+        "bachelor degree": "Bachelors",
+        "bachelors degree": "Bachelors",
+        "tech": "Technology",
+        "technology": "Technology",
+        "health": "Healthcare",
+        "healthcare": "Healthcare",
+        "high": "High",
+        "medium": "Medium",
+        "moderate": "Medium",
+        "low": "Low",
+        "employed": "Employed",
+        "unemployed": "Unemployed",
+    }
+
+    def normalize_key(value: str) -> str:
+        value = value.strip().lower()
+
+        # Normalize common separators/punctuation.
+        value = value.replace("_", " ")
+        value = value.replace("-", " ")
+        value = value.replace(".", "")
+        value = value.replace("'", "")
+
+        # Collapse repeated whitespace.
+        value = " ".join(value.split())
+
+        # Normalize numeric ranges:
+        # "18 to 24" and "18-24" -> "18 24"
+        value = value.replace(" to ", " ")
+
+        return value
+
     cleaned = non_null.str.strip()
 
     groups: dict[str, list[str]] = {}
 
     for value in cleaned:
-        normalized = value.lower()
+        normalized = normalize_key(value)
         groups.setdefault(normalized, []).append(value)
 
     canonical_map: dict[str, str] = {}
 
     for normalized, values in groups.items():
-        counts = pd.Series(values).value_counts()
-        canonical_map[normalized] = str(counts.index[0])
+        if normalized in semantic_aliases:
+            canonical_map[normalized] = semantic_aliases[normalized]
+        else:
+            counts = pd.Series(values).value_counts()
+            canonical_map[normalized] = str(counts.index[0])
 
     changed = 0
 
     for index in result[column].dropna().index:
         original = str(result.at[index, column])
-        cleaned_value = original.strip()
-        normalized = cleaned_value.lower()
+        normalized = normalize_key(original)
 
-        canonical = canonical_map[normalized]
+        canonical = semantic_aliases.get(
+            normalized,
+            canonical_map.get(normalized, original.strip()),
+        )
 
         if original != canonical:
             changed += 1
@@ -162,7 +216,6 @@ def _standardize_categories(
         result,
         f"Standardized {changed} categorical value(s) in '{column}'.",
     )
-
 
 def _flag_outliers(
     df: pd.DataFrame,
