@@ -71,10 +71,33 @@ st.markdown(
         }
 
         .hero p {
-            font-size: 1.08rem;
-            margin-top: 0.7rem;
-            margin-bottom: 0;
-            opacity: 0.85;
+        font-size: 1.08rem;
+        margin-top: 0.7rem;
+        margin-bottom: 0;
+        opacity: 0.85;
+        }
+
+        .hero-eyebrow {
+        font-size: 0.78rem;
+        font-weight: 700;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        opacity: 0.72;
+        margin-bottom: 0.7rem;
+        }
+
+        .hero-badges {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.6rem;
+        margin-top: 1.3rem;
+        }
+
+        .hero-badges span {
+        padding: 0.42rem 0.8rem;
+        border-radius: 999px;
+        border: 1px solid rgba(120, 120, 120, 0.28);
+        font-size: 0.86rem;
         }
 
         .workflow-box {
@@ -84,11 +107,6 @@ st.markdown(
             text-align: center;
             font-weight: 600;
             margin-bottom: 1.5rem;
-        }
-
-        .section-note {
-            opacity: 0.75;
-            font-size: 0.95rem;
         }
     </style>
     """,
@@ -109,17 +127,13 @@ def show_dataset_insights(
     data: pd.DataFrame,
     title: str,
 ) -> None:
-    """
-    Render schema-aware descriptive visualizations.
-
-    Charts are generated only when suitable columns exist.
-    """
+    """Render adaptive descriptive visualizations for the dataset."""
 
     st.subheader(title)
 
     st.caption(
-        "Automatically generated descriptive insights based on "
-        "the available numeric and categorical columns."
+        "Explore the analysis-ready dataset with automatically adapted "
+        "visualizations based on available column types."
     )
 
     numeric_columns = data.select_dtypes(
@@ -129,6 +143,15 @@ def show_dataset_insights(
     categorical_columns = data.select_dtypes(
         include=["object", "category"]
     ).columns.tolist()
+
+    analysis_numeric_columns = [
+        column
+        for column in numeric_columns
+        if not column.endswith("_outlier_flag")
+    ]
+
+    missing_cells = int(data.isna().sum().sum())
+    duplicate_rows = int(data.duplicated().sum())
 
     metric1, metric2, metric3, metric4 = st.columns(4)
 
@@ -140,31 +163,71 @@ def show_dataset_insights(
 
     with metric3:
         st.metric(
-            "Numeric Columns",
-            len(numeric_columns),
+            "Numeric Features",
+            len(analysis_numeric_columns),
         )
 
     with metric4:
         st.metric(
             "Missing Cells",
-            f"{int(data.isna().sum().sum()):,}",
+            f"{missing_cells:,}",
         )
 
-    tab1, tab2, tab3 = st.tabs(
+    if duplicate_rows == 0:
+        st.success(
+            "✓ No exact duplicate rows detected in the current dataset."
+        )
+    else:
+        st.warning(
+            f"{duplicate_rows} exact duplicate row(s) remain."
+        )
+
+    (
+        overview_tab,
+        missing_tab,
+        numeric_tab,
+        category_tab,
+        relationship_tab,
+    ) = st.tabs(
         [
+            "Overview",
             "Missing Data",
-            "Numeric Insights",
-            "Category Insights",
+            "Distributions",
+            "Categories",
+            "Relationships",
         ]
     )
 
-    with tab1:
+    with overview_tab:
+        st.markdown("#### Dataset Overview")
+
+        overview_rows = []
+
+        for column in data.columns:
+            overview_rows.append(
+                {
+                    "Column": column,
+                    "Data Type": str(data[column].dtype),
+                    "Non-Null": int(data[column].notna().sum()),
+                    "Missing": int(data[column].isna().sum()),
+                    "Unique Values": int(
+                        data[column].nunique(dropna=True)
+                    ),
+                }
+            )
+
+        st.dataframe(
+            pd.DataFrame(overview_rows),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    with missing_tab:
         missing = (
             data.isna()
             .sum()
             .sort_values(ascending=False)
         )
-
         missing = missing[missing > 0]
 
         if missing.empty:
@@ -184,65 +247,111 @@ def show_dataset_insights(
                 x="Column",
                 y="Missing Values",
                 title="Missing Values by Column",
+                text="Missing Values",
             )
+            fig.update_layout(height=430)
 
             st.plotly_chart(
                 fig,
                 use_container_width=True,
             )
 
-    with tab2:
-        if not numeric_columns:
+            total_cells = len(data) * len(data.columns)
+            missing_percentage = (
+                (missing_cells / total_cells) * 100
+                if total_cells
+                else 0
+            )
+
+            st.caption(
+                f"{missing_cells:,} of {total_cells:,} cells are "
+                f"missing ({missing_percentage:.2f}%)."
+            )
+
+    with numeric_tab:
+        if not analysis_numeric_columns:
             st.info(
-                "No numeric columns are available for "
-                "distribution analysis."
+                "No numeric columns are available for distribution analysis."
             )
         else:
             selected_numeric = st.selectbox(
-                "Choose a numeric column",
-                numeric_columns,
+                "Choose a numeric feature",
+                analysis_numeric_columns,
                 key=f"{title}_numeric",
             )
 
-            fig = px.histogram(
-                data,
-                x=selected_numeric,
-                title=f"Distribution of {selected_numeric}",
+            chart_type = st.radio(
+                "Visualization",
+                ["Histogram", "Box Plot"],
+                horizontal=True,
+                key=f"{title}_numeric_chart",
             )
+
+            if chart_type == "Histogram":
+                fig = px.histogram(
+                    data,
+                    x=selected_numeric,
+                    title=f"Distribution of {selected_numeric}",
+                )
+            else:
+                fig = px.box(
+                    data,
+                    y=selected_numeric,
+                    points="outliers",
+                    title=f"Box Plot of {selected_numeric}",
+                )
+
+            fig.update_layout(height=450)
 
             st.plotly_chart(
                 fig,
                 use_container_width=True,
             )
 
-            if len(numeric_columns) >= 2:
-                st.markdown("#### Numeric Correlation")
+            numeric_series = data[selected_numeric].dropna()
 
-                correlation = (
-                    data[numeric_columns]
-                    .corr(numeric_only=True)
-                )
+            if not numeric_series.empty:
+                stat1, stat2, stat3, stat4 = st.columns(4)
 
-                st.dataframe(
-                    correlation.round(2),
-                    use_container_width=True,
-                )
+                with stat1:
+                    st.metric(
+                        "Mean",
+                        f"{numeric_series.mean():,.2f}",
+                    )
 
-    with tab3:
+                with stat2:
+                    st.metric(
+                        "Median",
+                        f"{numeric_series.median():,.2f}",
+                    )
+
+                with stat3:
+                    st.metric(
+                        "Minimum",
+                        f"{numeric_series.min():,.2f}",
+                    )
+
+                with stat4:
+                    st.metric(
+                        "Maximum",
+                        f"{numeric_series.max():,.2f}",
+                    )
+
+    with category_tab:
         usable_categories = [
             column
             for column in categorical_columns
-            if 1 < data[column].nunique(dropna=True) <= 20
+            if 1 < data[column].nunique(dropna=True) <= 30
         ]
 
         if not usable_categories:
             st.info(
-                "No low-cardinality categorical columns "
-                "are suitable for a category chart."
+                "No low-cardinality categorical columns are suitable "
+                "for category visualization."
             )
         else:
             selected_category = st.selectbox(
-                "Choose a categorical column",
+                "Choose a categorical feature",
                 usable_categories,
                 key=f"{title}_category",
             )
@@ -261,17 +370,119 @@ def show_dataset_insights(
                 "Count",
             ]
 
-            fig = px.bar(
-                category_counts,
-                x=selected_category,
-                y="Count",
-                title=f"{selected_category} Distribution",
+            category_chart_options = ["Bar Chart"]
+
+            if len(category_counts) <= 8:
+                category_chart_options.append("Pie Chart")
+
+            category_chart = st.radio(
+                "Visualization",
+                category_chart_options,
+                horizontal=True,
+                key=f"{title}_category_chart",
             )
+
+            if category_chart == "Pie Chart":
+                fig = px.pie(
+                    category_counts,
+                    names=selected_category,
+                    values="Count",
+                    hole=0.35,
+                    title=f"{selected_category} Composition",
+                )
+            else:
+                fig = px.bar(
+                    category_counts,
+                    x=selected_category,
+                    y="Count",
+                    title=f"{selected_category} Distribution",
+                    text="Count",
+                )
+
+            fig.update_layout(height=450)
 
             st.plotly_chart(
                 fig,
                 use_container_width=True,
             )
+
+    with relationship_tab:
+        if len(analysis_numeric_columns) < 2:
+            st.info(
+                "At least two numeric features are required "
+                "for relationship analysis."
+            )
+        else:
+            relationship_type = st.radio(
+                "Analysis",
+                ["Scatter Plot", "Correlation Heatmap"],
+                horizontal=True,
+                key=f"{title}_relationship_type",
+            )
+
+            if relationship_type == "Scatter Plot":
+                rel_col1, rel_col2 = st.columns(2)
+
+                with rel_col1:
+                    x_column = st.selectbox(
+                        "X-axis feature",
+                        analysis_numeric_columns,
+                        index=0,
+                        key=f"{title}_scatter_x",
+                    )
+
+                y_options = [
+                    column
+                    for column in analysis_numeric_columns
+                    if column != x_column
+                ]
+
+                with rel_col2:
+                    y_column = st.selectbox(
+                        "Y-axis feature",
+                        y_options,
+                        index=0,
+                        key=f"{title}_scatter_y",
+                    )
+
+                fig = px.scatter(
+                    data,
+                    x=x_column,
+                    y=y_column,
+                    title=f"{y_column} vs {x_column}",
+                    hover_data=categorical_columns[:2],
+                )
+
+                fig.update_layout(height=480)
+
+                st.plotly_chart(
+                    fig,
+                    use_container_width=True,
+                )
+            else:
+                correlation = (
+                    data[analysis_numeric_columns]
+                    .corr(numeric_only=True)
+                )
+
+                fig = px.imshow(
+                    correlation,
+                    text_auto=".2f",
+                    aspect="auto",
+                    title="Numeric Feature Correlation Heatmap",
+                )
+
+                fig.update_layout(height=500)
+
+                st.plotly_chart(
+                    fig,
+                    use_container_width=True,
+                )
+
+                st.caption(
+                    "Correlation describes statistical association "
+                    "and does not establish causation."
+                )
 
 
 # ---------------------------------------------------------
@@ -280,14 +491,17 @@ def show_dataset_insights(
 
 st.markdown(
     """
-    <div class="hero">
-        <h1>🧹 DataFix Agent</h1>
-        <p>
-            Autonomous data-quality analysis, human-controlled
-            remediation, independent validation, and instant
-            data insights.
-        </p>
-    </div>
+<div class="hero">
+<div class="hero-eyebrow">AGENTIC DATA QUALITY &amp; INTELLIGENCE PLATFORM</div>
+<h1>🧹 DataFix Agent</h1>
+<p>Transform messy CSV data into validated, analysis-ready datasets with autonomous issue detection, AI-assisted reasoning, human-controlled remediation, independent verification, and adaptive visual insights.</p>
+<div class="hero-badges">
+<span>🤖 Agentic Analysis</span>
+<span>👤 Human-in-the-Loop</span>
+<span>✓ Independent Validation</span>
+<span>📊 Adaptive Insights</span>
+</div>
+</div>
     """,
     unsafe_allow_html=True,
 )
@@ -295,8 +509,21 @@ st.markdown(
 st.markdown(
     """
     <div class="workflow-box">
-        Upload → Detect → Reason → Approve → Fix →
-        Validate → Visualize → Download
+        📤 Upload
+        &nbsp; → &nbsp;
+        🔍 Detect
+        &nbsp; → &nbsp;
+        🧠 Reason
+        &nbsp; → &nbsp;
+        👤 Approve
+        &nbsp; → &nbsp;
+        🛠️ Fix
+        &nbsp; → &nbsp;
+        ✓ Validate
+        &nbsp; → &nbsp;
+        📊 Explore
+        &nbsp; → &nbsp;
+        ⬇️ Export
     </div>
     """,
     unsafe_allow_html=True,
@@ -308,27 +535,60 @@ st.markdown(
 # ---------------------------------------------------------
 
 with st.sidebar:
-    st.header("DataFix Agent")
+    st.header("🧹 DataFix Agent")
+    st.caption("Your guide to using the workspace")
 
-    st.write(
-        "Turn messy CSV data into validated, "
-        "analysis-ready datasets."
+    st.divider()
+
+    st.markdown("### How to Use")
+
+    st.markdown(
+        """
+**1. Upload your CSV**
+Start with the dataset you want to inspect and clean.
+
+**2. Review detected issues**
+Check the quality score, detected problems, and the agent's proposed remediation plan.
+
+**3. Make the decision**
+Approve or reject each proposed action before anything is changed.
+
+**4. Run remediation**
+DataFix executes only your approved actions and independently validates the result.
+
+**5. Explore & export**
+Review the cleaned data, adaptive insights, quality improvement, and audit trail — then download the final CSV.
+"""
     )
 
     st.divider()
 
-    st.markdown("### Agent Guardrails")
+    st.markdown("### What You'll Get")
 
-    st.success("✓ Human approval required")
-    st.info("✓ Deterministic validation")
-    st.info("✓ Outliers preserved and flagged")
-    st.info("✓ Every action is audited")
+    st.markdown(
+        """
+- Data quality assessment
+- AI-assisted remediation plan
+- Before vs. after validation
+- Cleaned, analysis-ready dataset
+- Adaptive visual insights
+- Complete execution audit trail
+"""
+    )
 
     st.divider()
+
+    st.markdown("### Your Data, Your Control")
 
     st.caption(
-        "WCC Launchpad 30 • Agentic AI Track"
+        "No remediation is executed without your approval. "
+        "Outliers are preserved and flagged, and every executed "
+        "action is independently validated and auditable."
     )
+
+    st.divider()
+
+    st.caption("WCC Launchpad 30 • Agentic AI Track")
 
 
 # ---------------------------------------------------------
@@ -420,8 +680,15 @@ with duplicate_col:
         int(df.duplicated().sum()),
     )
 
-st.caption(
-    f"Quality grade: {state.quality_score['grade']}"
+quality_score_value = state.quality_score["score"]
+
+st.progress(
+    quality_score_value / 100,
+    text=(
+        f"Overall Data Quality: "
+        f"{quality_score_value}/100 — "
+        f"{state.quality_score['grade']}"
+    ),
 )
 
 
@@ -462,8 +729,7 @@ if state.issues:
         st.subheader("Issue Distribution")
 
         issue_counts = (
-            issue_df.groupby("Issue", as_index=False)
-            ["Affected"]
+            issue_df.groupby("Issue", as_index=False)["Affected"]
             .sum()
         )
 
@@ -480,7 +746,6 @@ if state.issues:
             use_container_width=True,
         )
 
-
     # -----------------------------------------------------
     # Agent reasoning
     # -----------------------------------------------------
@@ -495,8 +760,7 @@ if state.issues:
     ):
         for action in state.remediation_plan:
             st.markdown(
-                f"**{action['action_id']} — "
-                f"{action['action']}**"
+                f"**{action['action_id']} — {action['action']}**"
             )
 
             st.write(
@@ -510,9 +774,7 @@ if state.issues:
             )
 
             st.write(action["description"])
-
             st.divider()
-
 
     # -----------------------------------------------------
     # Human approval
@@ -548,7 +810,6 @@ if state.issues:
                 decision=decision,
             )
         )
-
 
     # -----------------------------------------------------
     # Execution
@@ -596,26 +857,17 @@ if state.issues:
                 f"remediation action(s)."
             )
 
-
     # -----------------------------------------------------
     # Results
     # -----------------------------------------------------
 
     if st.session_state.executed_state is not None:
-        result_state = (
-            st.session_state.executed_state
-        )
+        result_state = st.session_state.executed_state
 
         st.header("5. Remediation Results")
 
-        before_score = result_state.quality_score[
-            "score"
-        ]
-
-        after_score = result_state.final_score[
-            "score"
-        ]
-
+        before_score = result_state.quality_score["score"]
+        after_score = result_state.final_score["score"]
         improvement = after_score - before_score
 
         col1, col2, col3, col4 = st.columns(4)
@@ -644,6 +896,54 @@ if state.issues:
                 result_state.validation[
                     "resolved_approved_actions"
                 ],
+            )
+
+        st.markdown("#### Data Quality Changes")
+
+        before_missing = int(
+            result_state.original_df.isna().sum().sum()
+        )
+        after_missing = int(
+            result_state.cleaned_df.isna().sum().sum()
+        )
+
+        before_duplicates = int(
+            result_state.original_df.duplicated().sum()
+        )
+        after_duplicates = int(
+            result_state.cleaned_df.duplicated().sum()
+        )
+
+        before_rows = len(result_state.original_df)
+        after_rows = len(result_state.cleaned_df)
+
+        change1, change2, change3 = st.columns(3)
+
+        with change1:
+            st.metric(
+                "Missing Cells",
+                after_missing,
+                delta=after_missing - before_missing,
+                delta_color="inverse",
+                help=f"Before remediation: {before_missing}",
+            )
+
+        with change2:
+            st.metric(
+                "Duplicate Rows",
+                after_duplicates,
+                delta=after_duplicates - before_duplicates,
+                delta_color="inverse",
+                help=f"Before remediation: {before_duplicates}",
+            )
+
+        with change3:
+            st.metric(
+                "Dataset Rows",
+                after_rows,
+                delta=after_rows - before_rows,
+                delta_color="off",
+                help=f"Before remediation: {before_rows}",
             )
 
         comparison_df = pd.DataFrame(
@@ -688,7 +988,6 @@ if state.issues:
                 f"additional review."
             )
 
-
         # -------------------------------------------------
         # Cleaned data
         # -------------------------------------------------
@@ -699,7 +998,6 @@ if state.issues:
             result_state.cleaned_df,
             use_container_width=True,
         )
-
 
         # -------------------------------------------------
         # Adaptive insights
@@ -712,7 +1010,6 @@ if state.issues:
             "Explore the Cleaned Data",
         )
 
-
         # -------------------------------------------------
         # Audit
         # -------------------------------------------------
@@ -721,23 +1018,25 @@ if state.issues:
 
         with st.expander(
             "View Agent Execution Log",
-            expanded=False,
-        ):
+            expanded=False,):
+            audit_rows = []
             for entry in result_state.audit_log:
-                st.markdown(
-                    f"**{entry.action_id} — "
-                    f"{entry.action}**"
-                )
+                audit_rows.append(
+            {
+                "Action ID": entry.action_id,
+                "Action": entry.action,
+                "Status": entry.status.upper(),
+                "Execution Result": entry.message,
+            }
 
-                st.write(
-                    f"Status: **{entry.status.upper()}**"
-                )
+            )
 
-                st.write(entry.message)
-
-                st.divider()
-
-
+            audit_df = pd.DataFrame(audit_rows)
+            st.dataframe(
+                audit_df,
+                use_container_width=True,
+                hide_index=True,
+            )
         # -------------------------------------------------
         # Download
         # -------------------------------------------------
